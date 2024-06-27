@@ -269,7 +269,7 @@ os.makedirs('models', exist_ok=True)
 for l in labels:
     new_models = okcomp.comp1.create_clf_model(model_names)
 
-    new_models['RandomForest'] = RandomForestClassifier(n_estimators=20, max_depth=5, min_samples_split=2, 
+    new_models['RandomForest'] = RandomForestClassifier(n_estimators=50, max_depth=5, min_samples_split=2, 
                                                         min_samples_leaf=4, max_features='sqrt',random_state=100)
     model_names = list(new_models.keys())
     new_models = list(new_models.values())
