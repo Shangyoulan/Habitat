@@ -1,0 +1,453 @@
+#提取整个肿瘤的特征
+import radiomics
+from radiomics import featureextractor
+import pandas as pd
+import os
+
+# 定义特征提取器参数
+settings = {
+    'binWidth': 25,
+    'sigma': [1, 1, 1],
+    'resampledPixelSpacing': None
+}
+
+# 定义特征提取器
+extractor = featureextractor.RadiomicsFeatureExtractor(**settings)
+
+image_types = {
+    "Original": {},
+}
+
+# 启用选择的图像类型
+extractor.enableImageTypes(**image_types)
+
+# 定义数据目录为当前目录
+dataDir = os.getcwd()
+
+# 获取图像和掩膜的文件名列表
+image_files = set(os.listdir(os.path.join(dataDir, "images")))
+mask_files = set(os.listdir(os.path.join(dataDir, "masks")))
+
+# 寻找匹配的和不匹配的文件
+matched_files = image_files.intersection(mask_files)
+unmatched_files = image_files.symmetric_difference(mask_files)
+
+# 定义结果数据框
+df = pd.DataFrame()
+
+# 仅遍历匹配的文件
+for matched_file in matched_files:
+    imagePath = os.path.join(dataDir, "images", matched_file)
+    maskPath = os.path.join(dataDir, "masks", matched_file)
+
+    # 打印正在处理的文件
+    print(f"正在处理图像文件 {matched_file} 和掩膜文件 {matched_file}")
+
+    # 执行特征提取操作
+    try:
+        featureVector = extractor.execute(imagePath, maskPath)
+        # 将特征保存到数据框
+        df_add = pd.DataFrame.from_dict(featureVector.values()).T
+        df_add.columns = featureVector.keys()
+        df_add.insert(0, 'imageName', os.path.splitext(matched_file)[0])
+        df = pd.concat([df, df_add])
+    except Exception as e:
+        print(f"在处理图像文件 {matched_file} 和掩膜文件 {matched_file} 时遇到错误，已跳过这个文件。错误详情: {e}")
+
+# 将结果保存到Excel文件中
+result_file = os.path.join(dataDir, '影像组学特征.xlsx')
+df.to_excel(result_file, index=False)
+print("结果已保存到文件：", result_file)
+
+# 打印未匹配的文件
+if unmatched_files:
+    print("\n以下文件名没有匹配：")
+    for file in unmatched_files:
+        print(file)
+
+#确定最佳聚类数
+import pandas as pd
+import numpy as np
+from sklearn.mixture import GaussianMixture
+from sklearn.preprocessing import StandardScaler
+import os
+
+def get_K(features, K_num):
+    lowest_bic = np.infty
+    bic = []
+    n_components_range = range(2, K_num + 1)
+    cv_types = ["full"]
+    for cv_type in cv_types:
+        for n_components in n_components_range:
+            gmm = GaussianMixture(
+                n_components=n_components, covariance_type=cv_type, random_state=0
+            )
+            gmm.fit(features)
+            bic.append(gmm.bic(features))
+            if bic[-1] < lowest_bic:
+                lowest_bic = bic[-1]
+                best_gmm = gmm
+
+    return best_gmm.n_components, best_gmm.covariance_type
+
+def RFtable_generate(df, mode='Z-score'):
+    c_name_list = df.columns.to_list()
+
+    c_rest_list = ['firstorder', 'glcm', 'glrlm', 'glszm', 'gldm', 'ngtdm']
+    rest_cname_list = [c_name for c_name in c_name_list if any(feature_type in c_name for feature_type in c_rest_list)]
+    
+    df_rest_origin = df[rest_cname_list]
+    
+    if mode == 'Z-score':
+        df_rest = pd.DataFrame(data=StandardScaler().fit_transform(df_rest_origin), columns=df_rest_origin.columns)
+    else:
+        df_rest = df_rest_origin
+    return df_rest
+
+feature_file = r'./影像组学特征.xlsx'
+EDI_dir = r'./特征聚类'
+
+if not os.path.exists(EDI_dir):
+    os.makedirs(EDI_dir)
+
+K_num = 8   # EDI range 1-5, can be set 10 as well
+Patients_K = pd.DataFrame()
+
+df = pd.read_excel(feature_file)
+
+# 选择除了'Group', 'imageName'之外的所有列
+features_df = df.drop(columns=['Group', 'imageName'])
+
+# 处理特征
+features_df_clean = RFtable_generate(features_df)
+
+# 标准化并转换为numpy数组
+features_np = features_df_clean.values
+
+# 获取整体特征集的最佳K值
+best_K, _ = get_K(features_np, K_num)
+print(f'整体特征集的最佳聚类数为：{best_K}')
+np.random.seed(0)
+
+import matplotlib.pyplot as plt
+from sklearn.decomposition import PCA
+
+from sklearn.mixture import GaussianMixture
+import numpy as np
+import matplotlib.pyplot as plt
+from sklearn.decomposition import PCA
+
+
+def plot_gmm_clusters(features, n_components, title):
+    # Fit GMM
+    gmm = GaussianMixture(n_components=n_components, random_state=0).fit(features)
+    labels = gmm.predict(features)
+
+    # Apply PCA
+    pca = PCA(n_components=2)
+    features_pca = pca.fit_transform(features)
+
+    # Calculate centers after PCA (to avoid dimensionality issues)
+    centers_pca = np.zeros((n_components, 2))
+    for i in range(n_components):
+        cluster_points = features_pca[labels == i]
+        centers_pca[i] = np.mean(cluster_points, axis=0)
+
+    # Plot clusters and radiating lines
+    plt.figure(figsize=(8, 6))
+    for i, center in enumerate(centers_pca):
+        cluster_points = features_pca[labels == i]
+        plt.scatter(cluster_points[:, 0], cluster_points[:, 1], label=f'Cluster {i+1}')
+        plt.scatter(center[0], center[1], marker='*', s=150, c='r')
+        for point in cluster_points:
+            plt.plot([center[0], point[0]], [center[1], point[1]], c='black', linewidth=0.5)
+
+    plt.title(title)
+    plt.xlabel('PCA Component 1')
+    plt.ylabel('PCA Component 2')
+    plt.legend()
+    plt.show()
+
+# 使用数据集 features_np 和不同的聚类数
+for k in range(2, 9):  # 从2到8的聚类数
+    plot_gmm_clusters(features_np, k, f'GMM Clustering with {k} Components')
+# 如果想保存这个结果到CSV
+output_file = os.path.join(EDI_dir, '整体最佳聚类数.csv')
+with open(output_file, 'w') as file:
+    file.write(f'整体最佳聚类数,{best_K}')
+
+#生成生境聚类热图
+from radiomics import featureextractor
+import os
+import SimpleITK as sitk
+import matplotlib.pyplot as plt
+from scipy import ndimage
+from concurrent.futures import ThreadPoolExecutor
+import numpy as np
+from radiomics import featureextractor
+import os
+import SimpleITK as sitk
+import matplotlib.pyplot as plt
+from scipy import ndimage
+from concurrent.futures import ThreadPoolExecutor
+import numpy as np
+
+def process_single_file(image_file, mask_file, odir, extractor, flag_plot, flag_retest):
+    try:
+        print("-----------------")
+        print("Processing image:", image_file)
+        print("Processing mask:", mask_file)
+
+        image = sitk.ReadImage(image_file)
+        mask = sitk.ReadImage(mask_file)
+
+        mask_arr = sitk.GetArrayFromImage(mask)
+
+        # 定义一个3x3x3的结构元素
+        structure_element = np.array([[[1]]])  # 1x1x1的结构元素
+
+        erosion = ndimage.binary_erosion(mask_arr, structure=structure_element, iterations=1)
+        erosion_mask = sitk.GetImageFromArray(erosion.astype(mask_arr.dtype))
+        erosion_mask.CopyInformation(mask)
+
+        patid = os.path.basename(image_file).split('-')[0]
+        eroded_file = os.path.join(odir, f"Cropped_{patid}-{'retest-' if flag_retest else ''}img.nii.gz")
+        sitk.WriteImage(erosion_mask, eroded_file)
+
+        voxel_result = extractor.execute(image_file, eroded_file, voxelBased=True)
+
+        for key, val in voxel_result.items():
+            if isinstance(val, sitk.Image):
+                # Resample the extracted feature image to match the original image's dimensions and spacing
+                resampler = sitk.ResampleImageFilter()
+                resampler.SetOutputSpacing(image.GetSpacing())
+                resampler.SetSize(image.GetSize())
+                resampler.SetOutputDirection(image.GetDirection())
+                resampler.SetOutputOrigin(image.GetOrigin())
+                resampler.SetTransform(sitk.Transform())
+                resampled_val = resampler.Execute(val)
+                
+                if flag_plot:
+                    parameter_map = sitk.GetArrayFromImage(resampled_val)
+                    plt.figure()
+                    plt.imshow(parameter_map[int(parameter_map.shape[0] / 2), :, :])
+                    plt.title(key)
+
+                featuremap_file = os.path.join(odir, f"{'_'.join([patid, 'test', key]) if flag_retest else '_'.join([patid,'test', key])}.nii.gz")
+                sitk.WriteImage(resampled_val, featuremap_file)
+            else:
+                # Diagnostic feature
+                print(f"{key}: {val}")
+
+        if not voxel_result:
+            print("No features extracted!")
+    except Exception as e:
+        print("An error occurred:", str(e))
+
+# ... (保留你的其他代码)
+
+def process_image(idir, sets, flag_plot=False, flag_retest=False):
+    odir = f"{idir}_featuremap_{sets}"
+    if not os.path.exists(odir):
+        os.makedirs(odir)
+
+    # Initialize extractor with your settings
+    settings = {
+        'binWidth': 25,
+        'sigma': [1, 1, 1],
+        'resampledPixelSpacing': None
+    }
+    extractor = featureextractor.RadiomicsFeatureExtractor(**settings)
+    
+    # Disable all features
+    extractor.disableAllFeatures()
+    
+    # Enable only the feature you need
+    extractor.enableFeaturesByName(firstorder=['Energy'])
+    #extractor.enableImageTypes(Original={})
+
+    tasks = []
+
+    for root, dirs, files in os.walk(idir):
+        for file in files:
+            if flag_retest:
+                if not file.endswith(".nii.gz"):
+                    continue
+            else:
+                if not file.endswith(".nii.gz"):
+                    continue
+
+            image_file = os.path.join(idir, "images", file)
+            mask_file = os.path.join(idir, "masks", file)
+            tasks.append((image_file, mask_file, odir, extractor, flag_plot, flag_retest))
+
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        for task in tasks:
+            executor.submit(process_single_file, *task)
+
+if __name__ == "__main__":
+    idir = r"./"
+    settings = ["R1B12"]
+    flag_plot = False
+    flag_retest = False
+
+    print("*************************************")
+    print("Compute 3D features using PyRadiomics extractor")
+    print("*************************************")
+
+    for sets in settings:
+        process_image(idir, sets, flag_plot, flag_retest)
+
+#生成聚类图
+from sklearn.cluster import KMeans
+import pandas as pd
+import numpy as np
+import SimpleITK as sitk
+import os
+from sklearn.preprocessing import MinMaxScaler
+from sklearn.decomposition import PCA
+
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+
+def compute_habitats(evaluate_dir, patientid):
+    odir = evaluate_dir + '_habitats'
+    if not os.path.exists(odir):
+        os.makedirs(odir)
+    
+    # 仅在开始时询问最佳的聚类数，并用于所有患者
+    sample_X = np.array([[0]])  # 为了匹配函数的参数，但实际上不会用到
+    Knum = determine_optimal_clusters(sample_X)
+
+    for p in patientid:
+        print(f"Processing patient: {p}")
+        db_test = pd.DataFrame()
+
+        for root, dirs, files in os.walk(evaluate_dir):
+            for file in files:
+                if p+'_test_original' in file:
+                    print(f"Processing file: {file}")
+                    feature = file.split('_test_original_')[1].split('.nii.gz')[0]
+
+                    if not feature == 'glcm_MCC':
+                        test_file = os.path.join(evaluate_dir, file)
+                        test_raw = sitk.ReadImage(test_file)
+                        test_arr = sitk.GetArrayFromImage(test_raw)
+
+                        X = test_arr.flatten()
+                        robu_scaler = MinMaxScaler().fit(X.reshape(-1, 1))
+                        X_scaled = robu_scaler.transform(X.reshape(-1, 1))
+                        X_arr = X_scaled.reshape(np.shape(test_arr))
+
+                        if feature == 'ngtdm_Strength':
+                            nanrm_test = np.isnan(X_arr)
+                            test_Nanrow = np.isnan(nanrm_test)
+                            print(f"test_Nanrow size: {np.sum(~test_Nanrow)}")
+
+                            test = X_arr[~test_Nanrow]
+
+                            df_test = pd.DataFrame(test, columns=[feature])
+                            db_test = pd.concat([db_test, df_test], axis=1)
+
+        X = db_test.replace(np.nan, 0)
+        pca = PCA(n_components=X.shape[1])
+        filtered_test_pca = pca.fit_transform(X)
+
+        evar = np.sum(pca.explained_variance_ratio_) * 100
+        print("Explained Variance: %s" % evar)
+
+        habFileName = os.path.join(odir, f'{p}')
+        kmeans = KMeans(n_clusters=Knum, init='k-means++', random_state=0, n_init=10)
+        y_kmeans = kmeans.fit_predict(filtered_test_pca)
+        cluster_arr_test = apply_cluster_labels(test_arr, test_Nanrow, y_kmeans)
+        save_cluster_image(cluster_arr_test, test_raw, habFileName)
+
+def determine_optimal_clusters(X):
+    try:
+        Knum = int(input("请输入最佳聚类数: ")) 
+    except ValueError:
+        print("输入无效，请输入一个整数。")
+        return determine_optimal_clusters(X)
+    return Knum
+
+def apply_cluster_labels(arr, Nanrow, labels):
+    cluster_arr = np.empty(np.shape(arr))
+    cluster_arr[:] = np.nan
+    cluster_arr[~Nanrow] = labels
+    return cluster_arr
+
+def save_cluster_image(cluster_arr, raw, filename):
+    cluster_img = sitk.GetImageFromArray(cluster_arr)
+    cluster_img.CopyInformation(raw)
+    sitk.WriteImage(cluster_img, filename)  
+    
+def get_unique_patient_ids(evaluate_dir):
+    patient_ids = set()
+    
+    for file in os.listdir(evaluate_dir):
+        parts = file.split('_')
+        if parts[1] == "test" or parts[1] == "retest":
+            patient_ids.add(parts[0])
+    
+    return list(patient_ids)
+
+evaluate_dir = r'./_featuremap_R1B12'
+patientid = get_unique_patient_ids(evaluate_dir)
+compute_habitats(evaluate_dir, patientid)
+
+
+def extract_labels_from_mask(mask_path, output_directory):
+    """
+    Extract and save individual label masks from a given mask NIFTI file.
+
+    Parameters:
+        mask_path (str): Path to the NIFTI mask file.
+        output_directory (str): Directory where the individual label masks will be saved.
+    """
+
+    # Read the mask
+    mask_image = sitk.ReadImage(mask_path)
+
+    # Convert the mask to a numpy array
+    mask_array = sitk.GetArrayFromImage(mask_image)
+
+    # Get unique labels present in the mask
+    unique_labels = np.unique(mask_array)
+    
+    # Exclude label 0 which typically represents the background
+    unique_labels = unique_labels[unique_labels != 0]
+
+    # For each label, create a binary mask and save it
+    for label in unique_labels:
+        binary_mask_array = np.where(mask_array == label, 1, 0).astype(np.uint8)
+        
+        # Convert binary numpy array back to SimpleITK Image
+        binary_mask_image = sitk.GetImageFromArray(binary_mask_array)
+        binary_mask_image.CopyInformation(mask_image)
+
+        # Create a filename based on original mask filename and label value
+        base_filename = os.path.basename(mask_path)
+        filename_without_extension, extension = os.path.splitext(base_filename)
+        if extension == ".gz":
+            filename_without_extension, _ = os.path.splitext(filename_without_extension)
+            extension = ".nii.gz"
+
+        output_filename = f"{filename_without_extension}_label_{label}{extension}"
+        output_path = os.path.join(output_directory, output_filename)
+
+        # Save the binary mask image
+        sitk.WriteImage(binary_mask_image, output_path)
+
+    print(f"Processed {len(unique_labels)} labels from {mask_path}")
+
+if __name__ == "__main__":
+    input_directory = r"./_featuremap_R1B12_habitats"
+    output_directory = r"./_featuremap_R1B12_habitats_分"
+
+    if not os.path.exists(output_directory):
+        os.makedirs(output_directory)
+
+    # Iterate over all .nii.gz files in the input directory
+    for mask_file in os.listdir(input_directory):
+        if mask_file.endswith(".nii.gz"):
+            mask_path = os.path.join(input_directory, mask_file)
+            extract_labels_from_mask(mask_path, output_directory)
