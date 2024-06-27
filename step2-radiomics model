@@ -1,4 +1,4 @@
-#读取数据
+#read data
 import os
 import pandas as pd
 from IPython.display import display
@@ -9,24 +9,19 @@ from onekey_algo import get_param_in_cwd
 os.makedirs('img', exist_ok=True)
 os.makedirs('results', exist_ok=True)
 os.makedirs('features', exist_ok=True)
-# 设置任务Task前缀
 task_type = 'Habitat_'
-# 设置数据目录
 mydir = r''
-# 对应的标签文件
 group_info = 'group'
 labelf = ''
-# 读取标签数据列名
 labels = ['label']
 
-#images和masks匹配
+#Matching of images and tasks
 from pathlib import Path
 from onekey_algo.custom.components.Radiology import diagnose_3d_image_mask_settings, get_image_mask_from_dir
-# 生成images和masks对，一对一的关系。也可以自定义替换。
 images, masks = get_image_mask_from_dir(mydir, images=f'images', masks=f'masks')
-print(f'获取到{len(images)}个样本。')
+print(f'Get {len(images)} samples.')
 
-#提取特征
+#feature extraction
 import os
 os.environ["KMP_DUPLICATE_LIB_OK"]="TRUE"
 import concurrent.futures
@@ -55,7 +50,7 @@ for habitat in habitats:
 rad_data = habitat_feature_fusion(*rad_, mode=get_param_in_cwd('fusion_mode'))
 rad_data.to_csv('rad_features.csv', index=False)
 
-#通过计算每一个亚区体积与每一个亚区的特征之间的相关性，去除相关系数大于0.9的特征
+#Features with correlation coefficients greater than 0.9 were removed by calculating the correlation between the volume of each subregion and the features in each subregion
 import pandas as pd
 volumef = r'volume_invasive.xlsx'
 sheet1_name='Sheet1'
@@ -107,7 +102,7 @@ for feature in highly_correlated_features4:
 filtered_volume4 = volume4.drop(columns=highly_correlated_features4)
 filtered_volume4.to_csv('corr_feature4.csv', header=True, index=False)
 
-#标注数据
+#Labelling data
 group_info = 'group'
 labels = ['label']
 labelf = r'label_invasive.csv'
@@ -115,7 +110,7 @@ label_data['ID'] = label_data['ID'].map(lambda x: f"{x}.nii.gz" if not (f"{x}".e
 label_data = label_data[['ID', group_info] + labels]
 label_data
 
-#特征拼接，将标注数据label_data与rad_data进行合并，得到训练数据。
+#Feature splicing, merge label_data with rad_data to get training data.
 from onekey_algo.custom.utils import print_join_info
 print_join_info(rad_data, label_data)
 combined_data = pd.merge(rad_data, label_data, on=['ID'], how='inner')
@@ -124,28 +119,25 @@ combined_data = combined_data.drop(['ID'], axis=1)
 display(combined_data[labels].value_counts())
 display(combined_data[group_info].value_counts())
 
-#正则化
+#normalization
 from onekey_algo.custom.components.comp1 import normalize_df
 data = normalize_df(combined_data, not_norm=labels, group=group_info, use_train=True, verbose=True)
 data = data.dropna(axis=1)
 
-#统计检验
+#t-test
 import seaborn as sns
 from onekey_algo.custom.components.stats import clinic_stats
 
 sub_data = data[data[group_info] == 'train']
 stats = clinic_stats(sub_data, stats_columns=list(data.columns[0:-2]), label_column=labels[0], 
                      continuous_columns=list(data.columns[0:-2]))
-stats
-
-#调整p value进行筛选
 pvalue = 0.05
 sel_feature = list(stats[stats['pvalue'] < pvalue]['feature_name']) + labels + [group_info]
 sub_data = sub_data[sel_feature]
 sub_data
 sub_data.to_csv('ttest_features.csv', header=True, index=False)
 
-#计算相关系数并进行特征筛选
+#Calculate correlation coefficients and perform feature selection
 import math
 pearson_corr = sub_data[[c for c in sub_data.columns if c not in labels]].corr('pearson')
 pearson_corr
@@ -154,7 +146,7 @@ sel_feature = select_feature(pearson_corr, threshold=0.9, topn=16, verbose=False
 sel_feature = pd.DataFrame(sel_feature)
 sel_feature.to_csv('pearson_features.csv', header=True, index=False)
 
-#mRMR特征筛选
+#mRMR
 labels = ['label']
 mrmr_sel_feature_num = get_param_in_cwd('mrmr_sel_feature_num')
 if mrmr_sel_feature_num is not None:
@@ -162,16 +154,15 @@ if mrmr_sel_feature_num is not None:
 sel_feature += labels + [group_info]
 sel_feature
 
-#过滤特征
+#filter features
 sel_data = data[sel_feature]
 sel_data.to_csv('sel_data_20.csv', header=True, index=False)
 
-#手动将亚区体积添加到筛选的特征之后
-#将亚区体积添加到筛选的特征之后
+#Manually adding subregion volumes to filtered features 
 self = r'sel_data.csv'
 sel_data = pd.read_csv(self)
 
-#构建数据
+#Constructing data
 import numpy as np
 import onekey_algo.custom.components as okcomp
 group_info = 'group'
@@ -215,7 +206,7 @@ y_all_data = sel_data[labels]
 X_all_data = sel_data.drop(labels + [group_info], axis=1)
 
 column_names = X_data.columns
-print(f"训练集样本数：{X_data.shape}, 验证集样本数：{X_val_data.shape}, 测试集1样本数：{X_test_data.shape}, 测试集2样本数：{X_test2_data.shape}, 测试集3样本数：{X_test3_data.shape}")
+print(f"Number of samples in training set：{X_data.shape}, Number of samples in validation set：{X_val_data.shape},  Number of samples in test1 set：{X_test_data.shape},  Number of samples in test2 set：{X_test2_data.shape},  Number of samples in test3 set：{X_test3_data.shape}")
 
 #LASSO
 alpha = okcomp.comp1.lasso_cv_coefs(X_data, y_data, column_names=None, alpha_logmin=-4)
@@ -226,9 +217,8 @@ plt.show()
 okcomp.comp1.lasso_cv_efficiency(X_data, y_data, points=50, alpha_logmin=-2.5)
 plt.savefig(f'img/{task_type}Rad_feature_mse.svg', bbox_inches = 'tight')
 
-#特征筛选，筛选出其中coef > 0的特征
 import pandas as pd
-COEF_THRESHOLD = 0 # 筛选的特征阈值
+COEF_THRESHOLD = 0 
 scores = []
 selected_features = []
 for idx, label in enumerate(labels):
@@ -247,7 +237,6 @@ for idx, label in enumerate(labels):
 print('\n'.join(scores))
 selected_features
 
-#进一步筛选特征，使用Lasso筛选出来的Coefficients比较高的特征作为训练数据
 X_data = X_data[selected_features[0]]
 X_val_data = X_val_data[selected_features[0]]
 X_test_data = X_test_data[selected_features[0]]
@@ -255,7 +244,7 @@ X_test2_data = X_test2_data[selected_features[0]]
 X_test3_data = X_test3_data[selected_features[0]]
 X_data.columns
 
-#构建模型
+#model construction
 import joblib
 from onekey_algo.custom.components.comp1 import plot_feature_importance, smote_resample
 from sklearn.ensemble import RandomForestClassifier
@@ -278,14 +267,12 @@ for l in labels:
         if l == 'label1':
             X_train_smote, y_train_smote = smote_resample(X_train_sel, y_train_sel[l])
         m.fit(X_train_smote, y_train_smote)
-        # 保存训练的模型
         joblib.dump(m, f'models/{task_type}Rad_{mn}_{l}.pkl') 
-        #输出模型特征重要性
         plot_feature_importance(m, selected_features[0], save_dir='img', prefix=f'{task_type}')
         plt.show()
     targets.append(new_models)
     
-#计算指标
+#Calculated indicators
 from sklearn.metrics import accuracy_score
 from sklearn.preprocessing import OneHotEncoder
 from onekey_algo.custom.components.delong import calc_95_CI
@@ -300,32 +287,31 @@ pred_scores = [[(model.predict_proba(X_train_sel), model.predict_proba(X_val_sel
 for label, prediction, scores in zip(labels, predictions, pred_scores):
     pred_sel_idx_label = []
     for mname, (train_pred, val_pred, test1_pred, test2_pred, test3_pred), (train_score,val_score, test1_score, test2_score, test3_pred) in zip(model_names, prediction, scores):
-        # 计算训练集指数
+        # training set
         acc, auc, ci, tpr, tnr, ppv, npv, precision, recall, f1, thres = analysis_pred_binary(y_train_sel[label], train_score[:, 1])
         ci = f"{ci[0]:.4f} - {ci[1]:.4f}"
         metric.append((mname, acc, auc, ci, tpr, tnr, ppv, npv, precision, recall, f1, thres, f"Train-{label}"))
         
-        # 计算验证集指数
+        # validation set
         acc, auc, ci, tpr, tnr, ppv, npv, precision, recall, f1, thres = analysis_pred_binary(y_val_sel[label], val_score[:, 1])
         ci = f"{ci[0]:.4f} - {ci[1]:.4f}"
         metric.append((mname, acc, auc, ci, tpr, tnr, ppv, npv, precision, recall, f1, thres, f"Val-{label}"))
         
-        # 计算测试集1指标
+        # test1
         acc, auc, ci, tpr, tnr, ppv, npv, precision, recall, f1, thres = analysis_pred_binary(y_test1_sel[label], test1_score[:, 1])
         ci = f"{ci[0]:.4f} - {ci[1]:.4f}"
         metric.append((mname, acc, auc, ci, tpr, tnr, ppv, npv, precision, recall, f1, thres, f'Test1-{label}'))
         
-        # 计算测试集2指标
+        # test2
         acc, auc, ci, tpr, tnr, ppv, npv, precision, recall, f1, thres = analysis_pred_binary(y_test2_sel[label], test2_score[:, 1])
         ci = f"{ci[0]:.4f} - {ci[1]:.4f}"
         metric.append((mname, acc, auc, ci, tpr, tnr, ppv, npv, precision, recall, f1, thres, f'Test2-{label}'))
         
-        # 计算测试集3指标
+        # test3
         acc, auc, ci, tpr, tnr, ppv, npv, precision, recall, f1, thres = analysis_pred_binary(y_test3_sel[label], test3_score[:, 1])
         ci = f"{ci[0]:.4f} - {ci[1]:.4f}"
         metric.append((mname, acc, auc, ci, tpr, tnr, ppv, npv, precision, recall, f1, thres, f'Test3-{label}'))    
         
-        # 计算thres对应的sel idx
         pred_sel_idx_label.append(np.logical_or(test_score[:, 0] >= thres, test_score[:, 1] >= thres))
         
     pred_sel_idx.append(pred_sel_idx_label)
@@ -335,23 +321,20 @@ metric = pd.DataFrame(metric, index=None, columns=['model_name', 'Accuracy', 'AU
                                                    'Threshold', 'Task'])
 metric
 
-#绘制ROC曲线
+#ROC
 import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.metrics import roc_curve, auc
 
 RandomForest_data = metric[metric['model_name'] == 'RandomForest']
-# 提取 Train、Val、Test 的数据
 train_data = RandomForest_data[RandomForest_data['Task'].str.startswith('Train')]
 val_data = RandomForest_data[RandomForest_data['Task'].str.startswith('Val')]
 test1_data = RandomForest_data[RandomForest_data['Task'].str.startswith('Test1')]
 test2_data = RandomForest_data[RandomForest_data['Task'].str.startswith('Test2')]
 test3_data = RandomForest_data[RandomForest_data['Task'].str.startswith('Test3')]
-
-# 绘制 ROC 曲线
 plt.figure(figsize=(8, 8))
 
-# 绘制 Train 数据的 ROC 曲线
+# train
 for index, row in train_data.iterrows():
     fpr, tpr, thresholds = roc_curve(y_train_sel[row['Task'].split('-')[1]], train_score[:, 1])
     roc_auc = auc(fpr, tpr)
@@ -360,7 +343,7 @@ for index, row in train_data.iterrows():
     label = f"{row['Task'].replace('-label', '')} (AUC = {round(roc_auc, 3)})"
     plt.plot(fpr, tpr, label=label)
 
-# 绘制 Val 数据的 ROC 曲线
+# validation
 for index, row in val_data.iterrows():
     fpr, tpr, thresholds = roc_curve(y_val_sel[row['Task'].split('-')[1]], val_score[:, 1])
     roc_auc = auc(fpr, tpr)
@@ -369,43 +352,39 @@ for index, row in val_data.iterrows():
     label = f"{row['Task'].replace('-label', '').replace('Val', 'Validation')} (AUC = {round(roc_auc, 3)})"
     plt.plot(fpr, tpr, label=label)
 
-# 绘制 Test1 数据的 ROC 曲线
+# test1
 for index, row in test_data.iterrows():
     fpr, tpr, thresholds = roc_curve(y_test1_sel[row['Task'].split('-')[1]], test1_score[:, 1])
     roc_auc = auc(fpr, tpr)
     ci = row['95% CI']
-    #显示置信区间
     #label = f"{row['Task'].replace('-label', '')} (AUC = {round(roc_auc, 3)})\n95% CI: {ci}"
     label = f"{row['Task'].replace('-label', '')} (AUC = {round(roc_auc, 3)})"
     plt.plot(fpr, tpr, label=label)
 
-# 绘制 Test2 数据的 ROC 曲线
+# test2
 for index, row in test_data.iterrows():
     fpr, tpr, thresholds = roc_curve(y_test2_sel[row['Task'].split('-')[1]], test2_score[:, 1])
     roc_auc = auc(fpr, tpr)
     ci = row['95% CI']
-    #显示置信区间
     #label = f"{row['Task'].replace('-label', '')} (AUC = {round(roc_auc, 3)})\n95% CI: {ci}"
     label = f"{row['Task'].replace('-label', '')} (AUC = {round(roc_auc, 3)})"
     plt.plot(fpr, tpr, label=label)
 
-# 绘制 Test3 数据的 ROC 曲线
+# test3
 for index, row in test_data.iterrows():
     fpr, tpr, thresholds = roc_curve(y_test3_sel[row['Task'].split('-')[1]], test3_score[:, 1])
     roc_auc = auc(fpr, tpr)
     ci = row['95% CI']
-    #显示置信区间
     #label = f"{row['Task'].replace('-label', '')} (AUC = {round(roc_auc, 3)})\n95% CI: {ci}"
     label = f"{row['Task'].replace('-label', '')} (AUC = {round(roc_auc, 3)})"
     plt.plot(fpr, tpr, label=label) 
-# 随机线
 plt.plot([0, 1], [0, 1], linestyle='--', color='gray')
 plt.xlabel('1-Specificity',fontsize=15)
 plt.ylabel('Sensitivity',fontsize=15)
 plt.legend(loc='lower right', fontsize=15)  # You may adjust the font size as needed
 plt.show()
 
-#绘制决策曲线
+#decision curve
 sel_model = ['RandomForest']
 import numpy as np
 import matplotlib.pyplot as plt
@@ -454,7 +433,7 @@ for dataset, dataset_name in zip([y_train_sel, y_val_sel, y_test_sel], ['train',
                 plt.savefig(f'img/{label}_{task_type}Rad_model_{dataset_name.lower()}_{sm}_dca.svg', bbox_inches='tight')
                 plt.show()
 
-#绘制样本预测直方图
+#predictive histogram
 sel_model = ['RandomForest']
 c_matrix = {}
 
@@ -501,9 +480,8 @@ for sm in sel_model:
             plt.legend(labels=["label=0", "label=1"], loc="lower right", fontsize=20)
             plt.savefig(f'img/{label}_{task_type}Rad_test_{sm}_sample_dis.svg', bbox_inches='tight')
             plt.show()
-#将训练好的模型导出
+#Export model
 import joblib
-trained_model = new_models[0]  # 使用索引访问列表中的元素
-# 保存模型到文件
+trained_model = new_models[0]  
 joblib.dump(trained_model, 'your_model_filename.pkl')
 joblib
