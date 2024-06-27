@@ -1,71 +1,59 @@
-#提取整个肿瘤的特征
+#Extracting features of the whole tumour
 import radiomics
 from radiomics import featureextractor
 import pandas as pd
 import os
 
-# 定义特征提取器参数
+# Defining feature extractor parameters
 settings = {
     'binWidth': 25,
     'sigma': [1, 1, 1],
     'resampledPixelSpacing': None
 }
 
-# 定义特征提取器
+# Defining the Feature Extractor
 extractor = featureextractor.RadiomicsFeatureExtractor(**settings)
 
 image_types = {
     "Original": {},
 }
 
-# 启用选择的图像类型
 extractor.enableImageTypes(**image_types)
-
-# 定义数据目录为当前目录
 dataDir = os.getcwd()
-
-# 获取图像和掩膜的文件名列表
 image_files = set(os.listdir(os.path.join(dataDir, "images")))
 mask_files = set(os.listdir(os.path.join(dataDir, "masks")))
 
-# 寻找匹配的和不匹配的文件
+# Finding matching and non-matching files
 matched_files = image_files.intersection(mask_files)
 unmatched_files = image_files.symmetric_difference(mask_files)
 
-# 定义结果数据框
+# Defining the results data frame
 df = pd.DataFrame()
 
-# 仅遍历匹配的文件
 for matched_file in matched_files:
     imagePath = os.path.join(dataDir, "images", matched_file)
     maskPath = os.path.join(dataDir, "masks", matched_file)
-
-    # 打印正在处理的文件
     print(f"正在处理图像文件 {matched_file} 和掩膜文件 {matched_file}")
-
-    # 执行特征提取操作
     try:
         featureVector = extractor.execute(imagePath, maskPath)
-        # 将特征保存到数据框
         df_add = pd.DataFrame.from_dict(featureVector.values()).T
         df_add.columns = featureVector.keys()
         df_add.insert(0, 'imageName', os.path.splitext(matched_file)[0])
         df = pd.concat([df, df_add])
     except Exception as e:
-        print(f"在处理图像文件 {matched_file} 和掩膜文件 {matched_file} 时遇到错误，已跳过这个文件。错误详情: {e}")
+        print(f"Processing image files {matched_file} and mask files {matched_file} encounter an error. Error details: {e}")
 
-# 将结果保存到Excel文件中
-result_file = os.path.join(dataDir, '影像组学特征.xlsx')
+result_file = os.path.join(dataDir, 'Features.xlsx')
 df.to_excel(result_file, index=False)
-print("结果已保存到文件：", result_file)
+print("Results have been saved to file：", result_file)
 
-# 打印未匹配的文件
+# Printing unmatched files
 if unmatched_files:
-    print("\n以下文件名没有匹配：")
+    print("\nNo matches for the following filenames：")
     for file in unmatched_files:
         print(file)
 
-#确定最佳聚类数
+#Determining the optimum number of clusters
 import pandas as pd
 import numpy as np
 from sklearn.mixture import GaussianMixture
@@ -104,8 +92,8 @@ def RFtable_generate(df, mode='Z-score'):
         df_rest = df_rest_origin
     return df_rest
 
-feature_file = r'./影像组学特征.xlsx'
-EDI_dir = r'./特征聚类'
+feature_file = r'./Features.xlsx'
+EDI_dir = r'./feature clustering'
 
 if not os.path.exists(EDI_dir):
     os.makedirs(EDI_dir)
@@ -115,18 +103,14 @@ Patients_K = pd.DataFrame()
 
 df = pd.read_excel(feature_file)
 
-# 选择除了'Group', 'imageName'之外的所有列
+# # Select all columns except 'Group', 'imageName'.
 features_df = df.drop(columns=['Group', 'imageName'])
-
-# 处理特征
 features_df_clean = RFtable_generate(features_df)
-
-# 标准化并转换为numpy数组
 features_np = features_df_clean.values
 
-# 获取整体特征集的最佳K值
+# Get the best K value for the overall feature set
 best_K, _ = get_K(features_np, K_num)
-print(f'整体特征集的最佳聚类数为：{best_K}')
+print(f'The optimal number of clusters for the overall feature set is：{best_K}')
 np.random.seed(0)
 
 import matplotlib.pyplot as plt
@@ -168,15 +152,14 @@ def plot_gmm_clusters(features, n_components, title):
     plt.legend()
     plt.show()
 
-# 使用数据集 features_np 和不同的聚类数
-for k in range(2, 9):  # 从2到8的聚类数
+# Using the dataset features_np and the number of different clusters
+for k in range(2, 9):  
     plot_gmm_clusters(features_np, k, f'GMM Clustering with {k} Components')
-# 如果想保存这个结果到CSV
-output_file = os.path.join(EDI_dir, '整体最佳聚类数.csv')
+output_file = os.path.join(EDI_dir, 'Overall optimal number of clusters.csv')
 with open(output_file, 'w') as file:
-    file.write(f'整体最佳聚类数,{best_K}')
+    file.write(f'Overall optimal number of clusters,{best_K}')
 
-#生成生境聚类热图
+#Generation of habitat clustering heat maps
 from radiomics import featureextractor
 import os
 import SimpleITK as sitk
@@ -203,8 +186,7 @@ def process_single_file(image_file, mask_file, odir, extractor, flag_plot, flag_
 
         mask_arr = sitk.GetArrayFromImage(mask)
 
-        # 定义一个3x3x3的结构元素
-        structure_element = np.array([[[1]]])  # 1x1x1的结构元素
+        structure_element = np.array([[[1]]])  
 
         erosion = ndimage.binary_erosion(mask_arr, structure=structure_element, iterations=1)
         erosion_mask = sitk.GetImageFromArray(erosion.astype(mask_arr.dtype))
@@ -243,8 +225,6 @@ def process_single_file(image_file, mask_file, odir, extractor, flag_plot, flag_
             print("No features extracted!")
     except Exception as e:
         print("An error occurred:", str(e))
-
-# ... (保留你的其他代码)
 
 def process_image(idir, sets, flag_plot=False, flag_retest=False):
     odir = f"{idir}_featuremap_{sets}"
@@ -298,7 +278,7 @@ if __name__ == "__main__":
     for sets in settings:
         process_image(idir, sets, flag_plot, flag_retest)
 
-#生成聚类图
+#Generate a clustering diagram
 from sklearn.cluster import KMeans
 import pandas as pd
 import numpy as np
@@ -314,8 +294,7 @@ def compute_habitats(evaluate_dir, patientid):
     if not os.path.exists(odir):
         os.makedirs(odir)
     
-    # 仅在开始时询问最佳的聚类数，并用于所有患者
-    sample_X = np.array([[0]])  # 为了匹配函数的参数，但实际上不会用到
+    sample_X = np.array([[0]])  
     Knum = determine_optimal_clusters(sample_X)
 
     for p in patientid:
@@ -363,9 +342,9 @@ def compute_habitats(evaluate_dir, patientid):
 
 def determine_optimal_clusters(X):
     try:
-        Knum = int(input("请输入最佳聚类数: ")) 
+        Knum = int(input("Please enter the optimum number of clusters: ")) 
     except ValueError:
-        print("输入无效，请输入一个整数。")
+        print("Invalid input, please enter an integer.")
         return determine_optimal_clusters(X)
     return Knum
 
