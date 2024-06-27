@@ -1,4 +1,4 @@
-#Extracting features of the whole tumour
+#####Extracting features of the whole tumour
 import radiomics
 from radiomics import featureextractor
 import pandas as pd
@@ -53,7 +53,7 @@ if unmatched_files:
     for file in unmatched_files:
         print(file)
 
-#Determining the optimum number of clusters
+#########Determining the optimum number of clusters
 import pandas as pd
 import numpy as np
 from sklearn.mixture import GaussianMixture
@@ -159,7 +159,7 @@ output_file = os.path.join(EDI_dir, 'Overall optimal number of clusters.csv')
 with open(output_file, 'w') as file:
     file.write(f'Overall optimal number of clusters,{best_K}')
 
-#Generation of habitat clustering heat maps
+########Generation of habitat clustering heat maps
 from radiomics import featureextractor
 import os
 import SimpleITK as sitk
